@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/users?sslmode=disable
+      GRPC_ADDR: :50051
+    depends_on:
+      - postgres
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/orders?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      GRPC_ADDR: :50052
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  booking-service:
+    build:
+      context: .
+      dockerfile: booking-service/Dockerfile
+    ports:
+      - "50053:50053"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/bookings?sslmode=disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      GRPC_ADDR: :50053
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_ADDR: :8080
+      USER_SERVICE_ADDR: user-service:50051
+      ORDER_SERVICE_ADDR: order-service:50052
+      BOOKING_SERVICE_ADDR: booking-service:50053
+    depends_on:
+      - user-service
+      - order-service
+      - booking-service
+
+volumes:
+  postgres_data:
